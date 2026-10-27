@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:">
+  <title>Pocket Sampler</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="group">
+      <button id="btnPlay" class="tbtn" title="Play / Stop (Space)">▶</button>
+      <button id="btnRec" class="tbtn" title="Record into the pattern: pads you hit while playing are written in">●</button>
+      <button id="btnMetro" class="tbtn" title="Metronome">♩</button>
+    </div>
+    <div class="group">
+      <label class="lbl">BPM <input id="bpm" type="number" min="40" max="250" step="1"></label>
+      <button id="btnTap" title="Tap tempo">TAP</button>
+      <label class="lbl">Swing <input id="swing" type="range" min="50" max="75" step="1"></label>
+      <span id="swingVal" class="val"></span>
+    </div>
+    <div class="group patterns" id="patterns" title="Click to switch pattern · Shift+click to copy the current pattern there"></div>
+    <div class="group">
+      <select id="recSource" title="What to sample">
+        <option value="mic">Mic / line in</option>
+        <option value="system">System audio</option>
+        <option value="master">Resample master</option>
+      </select>
+      <button id="btnSample" class="sample" title="Record a sample into the selected pad">● SAMPLE</button>
+      <span id="sampleStatus"></span>
+    </div>
+    <div class="group right">
+      <canvas id="meter" width="120" height="12" title="Master level"></canvas>
+      <button id="btnNew">New</button>
+      <button id="btnOpen">Open</button>
+      <button id="btnSave" title="Save project (Ctrl+S)">Save</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="pads-area">
+      <div id="pads" class="pads"></div>
+      <div class="hint">Keys 1–4 · Q–R · A–F · Z–V &nbsp;·&nbsp; drop audio files on a pad</div>
+    </section>
+
+    <section class="panel">
+      <nav class="tabs">
+        <button data-tab="edit" class="active">Sample</button>
+        <button data-tab="seq">Sequence</button>
+        <button data-tab="fx">FX &amp; Export</button>
+      </nav>
+
+      <div id="tab-edit" class="tab active">
+        <div class="pad-title"><span id="padLabel"></span><span id="padName"></span></div>
+        <div class="wave-wrap" id="waveWrap">
+          <canvas id="wave"></canvas>
+          <canvas id="waveOverlay"></canvas>
+        </div>
+        <div class="row">
+          <button id="btnLoad">Load file…</button>
+          <input type="file" id="fileInput" accept="audio/*" multiple hidden>
+          <button id="btnTrim" title="Crop the sample to the selected region">Trim</button>
+          <button id="btnReverse">Reverse</button>
+          <button id="btnNormalize">Normalize</button>
+          <button id="btnExportPad">Export sample…</button>
+          <button id="btnClearPad" class="danger">Clear pad</button>
+        </div>
+        <div class="row">
+          <span class="lbl">Chop</span>
+          <select id="chopCount">
+            <option>2</option><option>4</option><option selected>8</option><option>16</option>
+          </select>
+          <button id="btnChopEqual">Equal slices</button>
+          <button id="btnChopTrans">By transients</button>
+          <span class="hint">slices the selected region onto pads, starting at this pad</span>
+        </div>
+        <div class="row">
+          <div class="seg" id="modeSeg">
+            <button data-v="oneshot" title="Plays to the end on each hit">One-shot</button>
+            <button data-v="gate" title="Plays only while held">Gate</button>
+          </div>
+          <button id="btnLoop" title="Loop the selected region">Loop</button>
+          <label class="lbl">Choke group
+            <select id="choke">
+              <option value="0">none</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+            </select>
+          </label>
+        </div>
+        <div class="params" id="padParams"></div>
+        <p class="hint">Double-click a slider to reset it.</p>
+      </div>
+
+      <div id="tab-seq" class="tab">
+        <div class="row">
+          <label class="lbl">Length
+            <select id="bars"><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option><option value="8">8 bars</option></select>
+          </label>
+          <label class="lbl">Quantize
+            <select id="quantize"><option value="8">1/8</option><option value="4">1/16</option><option value="2">1/32</option><option value="1">Off</option></select>
+          </label>
+          <div class="seg" id="pages"></div>
+          <button id="btnFollow" title="Keep the playing bar on screen">Follow</button>
+          <span class="spacer"></span>
+          <button id="btnUndo" title="Undo (Ctrl+Z)">Undo</button>
+          <button id="btnClearPadSeq">Clear pad</button>
+          <button id="btnClearPattern" class="danger">Clear pattern</button>
+        </div>
+        <div id="grid" class="grid"></div>
+      </div>
+
+      <div id="tab-fx" class="tab">
+        <h3>Master FX</h3>
+        <div class="params" id="masterParams"></div>
+        <div class="row">
+          <label class="lbl">Delay time <select id="delayDiv"></select></label>
+        </div>
+        <h3>Export</h3>
+        <div class="row">
+          <label class="lbl">Loops <select id="exportLoops"><option>1</option><option>2</option><option selected>4</option><option>8</option></select></label>
+          <label class="lbl"><input type="checkbox" id="exportTail" checked> Include FX tail</label>
+          <button id="btnExport">Export pattern as WAV…</button>
+        </div>
+        <p class="hint">Renders the current pattern offline with all pad and master FX. Muted pads are left out.</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+
+  <script src="js/dsp.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/sequencer.js"></script>
+  <script src="js/recorder.js"></script>
+  <script src="js/project.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

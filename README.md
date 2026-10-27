@@ -1,0 +1,65 @@
+# Pocket Sampler
+
+A 16-pad sampler and pattern sequencer for Windows, in the spirit of Koala Sampler.
+Built with Electron and the Web Audio API.
+
+## Run
+
+```powershell
+npm install
+npm start
+```
+
+`npm run smoke` runs a headless self-test (render, export, project round-trip) and quits.
+Set `SMOKE_SHOT=path\to\shot.png` (and optionally `SMOKE_TAB=seq|fx`) to also save a screenshot.
+
+## Build a Windows app
+
+```powershell
+npm run dist
+```
+
+Outputs in `dist/`:
+
+- `PocketSampler-Setup-<version>.exe`: installer (choose folder, desktop + Start menu shortcuts, uninstaller)
+- `PocketSampler-Portable-<version>.exe`: single exe, no install
+- `win-unpacked/`: the unpacked app, handy for quick testing
+
+The builds are unsigned, so Windows SmartScreen shows "Windows protected your PC" on first run
+(More info → Run anyway). The icon comes from `build/icon.ico`; regenerate it with `npm run icon`
+(needs Python + Pillow). Bump `version` in `package.json` before each release.
+
+## Using it
+
+**Pads**: click or use the keys `1–4 / Q–R / A–F / Z–V`. Drag audio files onto a pad; dropping
+several files fills consecutive pads.
+
+**Sampling**: pick a source in the top bar, select a pad, press **● SAMPLE**, press again to stop.
+
+- *Mic / line in*: any Windows input device (leading/trailing silence is trimmed).
+- *System audio*: whatever Windows is playing (WASAPI loopback).
+- *Resample master*: records the app's own output, FX included. Great for bouncing a beat onto one pad.
+
+**Sample tab**: drag the S/E markers to set the region. Trim, reverse, normalize, export.
+Chop the region into equal slices or by detected transients; slices land on consecutive pads.
+Per pad: one-shot/gate, loop, choke group, volume, pan, pitch, filter, envelope, reverb/delay sends.
+
+**Sequence tab**: 16-step grid per bar, 1–8 bars, four patterns (A–D). Press **●** to record live:
+pad hits while playing are quantized into the pattern. Shift+click a pattern letter to copy the
+current pattern there. Changing patterns while playing switches at the end of the loop.
+`Space` plays/stops, `Ctrl+Z` undoes pattern edits.
+
+**FX & Export tab**: master DJ filter, reverb, tempo-synced delay, bitcrusher, and a limiter.
+Export renders the current pattern to a 16-bit WAV offline, exactly as it sounds live.
+
+**Projects**: `Save` / `Open` write `.psmp` files containing every sample and setting.
+
+## Layout
+
+- `main.js`, `preload.js`: Electron window, file dialogs, system-audio capture
+- `src/js/dsp.js`: worklets (bitcrusher, recorder), buffer edits, transient detection, WAV encoding
+- `src/js/engine.js`: state, master FX bus and voice playback (shared by live and offline render)
+- `src/js/sequencer.js`: lookahead clock, live recording, step editing, offline render
+- `src/js/recorder.js`: sampling from mic / loopback / master
+- `src/js/project.js`: project save/load
+- `src/js/app.js`: UI
