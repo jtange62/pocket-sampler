@@ -154,6 +154,40 @@ function createWindow() {
         const dragged = await win.webContents.executeJavaScript(`({ pad2: state.pads[1].name, pad1Empty: !state.pads[0].buffer,
           ghostGone: !document.querySelector('.pad-ghost'), selected: ui.selected })`);
         console.log('SMOKE DRAG', JSON.stringify(dragged));
+
+        // Real Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z key presses against that swap.
+        const key = async (keyCode, modifiers) => {
+          win.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+          win.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+          await new Promise((r) => setTimeout(r, 80));
+          return win.webContents.executeJavaScript('state.pads[0].name + "|" + state.pads[1].name');
+        };
+        const keys = {
+          undo: await key('Z', ['control']),
+          redo: await key('Y', ['control']),
+          undoAgain: await key('Z', ['control']),
+          shiftRedo: await key('Z', ['control', 'shift']),
+        };
+        // Trim, a step edit and a slider drag, each undone.
+        const more = await win.webContents.executeJavaScript(`(() => {
+          selectPad(1);
+          const p = state.pads[1], before = p.buffer.length;
+          p.start = 0.5;
+          document.querySelector('#btnTrim').click();
+          const trimmed = state.pads[1].buffer.length;
+          undo();
+          const trimUndone = state.pads[1].buffer.length === before && state.pads[1].start === 0.5;
+          const notesBefore = seq.pattern.notes.length;
+          seq.pushUndo('Edit steps'); seq.setStep(1, 15, true);
+          undo();
+          const stepUndone = seq.pattern.notes.length === notesBefore;
+          const vol = document.querySelector('[data-param="master.volume"] input');
+          const v0 = state.master.volume;
+          for (const v of [0.2, 0.3, 0.4]) { vol.value = v; vol.dispatchEvent(new Event('input')); }
+          undo();
+          return { trimmed: trimmed < before, trimUndone, stepUndone, sliderDragIsOneStep: state.master.volume === v0 };
+        })()`);
+        console.log('SMOKE UNDO', JSON.stringify({ ...keys, ...more }));
         if (process.env.SMOKE_SHOT) {
           if (process.env.SMOKE_TAB) {
             await win.webContents.executeJavaScript(`document.querySelector('[data-tab="${process.env.SMOKE_TAB}"]').click()`);

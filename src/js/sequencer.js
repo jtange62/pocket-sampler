@@ -19,7 +19,6 @@ class Sequencer {
     this.nextTime = 0;
     this.history = [];
     this.queued = null;
-    this.undoStack = [];
     this.recHeld = new Map();
     this.timer = null;
     this.onNote = null;
@@ -27,6 +26,7 @@ class Sequencer {
     this.onPlay = null;
     this.onStop = null;
     this.onPatternChange = null;
+    this.onEdit = null;
   }
 
   get pattern() { return this.state.patterns[this.state.currentPattern]; }
@@ -140,7 +140,7 @@ class Sequencer {
     const pos = this.currentTickFloat() ?? 0;
     const q = this.state.quantize;
     const target = (Math.round(pos / q) * q) % total;
-    this.pushUndo();
+    this.pushUndo('Record hit');
     const pat = this.pattern;
     pat.notes = pat.notes.filter((n) => !(n.pad === pad && n.tick === target));
     const note = { pad, tick: target, vel, len: TICKS_PER_STEP };
@@ -176,29 +176,23 @@ class Sequencer {
     if (on) pat.notes.push({ pad, tick: a, vel: 1, len: TICKS_PER_STEP });
   }
 
-  pushUndo(index = this.state.currentPattern) {
-    const p = this.state.patterns[index];
-    this.undoStack.push({ index, bars: p.bars, notes: p.notes.map(({ skip, ...n }) => ({ ...n })) });
-    if (this.undoStack.length > 64) this.undoStack.shift();
+  // Called before every pattern change so the app can snapshot it for undo.
+  pushUndo(label = 'Edit pattern') {
+    if (this.onEdit) this.onEdit(label);
   }
 
-  undo() {
-    const s = this.undoStack.pop();
-    if (!s) return false;
-    const p = this.state.patterns[s.index];
-    p.bars = s.bars;
-    p.notes = s.notes;
+  // After undo/redo replaced the patterns, keep the playhead inside the pattern.
+  clampTick() {
     this.tick %= this.totalTicks;
-    return true;
   }
 
   clearPattern() {
-    this.pushUndo();
+    this.pushUndo('Clear pattern');
     this.pattern.notes = [];
   }
 
   clearPad(pad) {
-    this.pushUndo();
+    this.pushUndo('Clear pad notes');
     this.pattern.notes = this.pattern.notes.filter((n) => n.pad !== pad);
   }
 
@@ -206,7 +200,7 @@ class Sequencer {
   setBars(bars) {
     const pat = this.pattern;
     if (bars === pat.bars) return;
-    this.pushUndo();
+    this.pushUndo('Change length');
     const oldTicks = pat.bars * TICKS_PER_BAR, newTicks = bars * TICKS_PER_BAR;
     if (bars > pat.bars) {
       const copies = [];
@@ -231,7 +225,7 @@ class Sequencer {
   }
 
   copyPattern(from, to) {
-    this.pushUndo(to);
+    this.pushUndo('Copy pattern');
     const src = this.state.patterns[from];
     this.state.patterns[to] = { bars: src.bars, notes: src.notes.map(({ skip, ...n }) => ({ ...n })) };
   }

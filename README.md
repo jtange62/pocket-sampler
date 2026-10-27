@@ -55,7 +55,11 @@ Per pad: one-shot/gate, loop, choke group, volume, pan, pitch, filter, envelope,
 **Sequence tab**: 16-step grid per bar, 1–8 bars, four patterns (A–D). Press **●** to record live:
 pad hits while playing are quantized into the pattern. Shift+click a pattern letter to copy the
 current pattern there. Changing patterns while playing switches at the end of the loop.
-`Space` plays/stops, `Ctrl+Z` undoes pattern edits.
+`Space` plays/stops.
+
+**Undo**: `Ctrl+Z` undoes almost anything: pattern edits, sample loads/recordings/edits/chops,
+clearing, swapping and copying pads, slider moves (one step per drag or knob turn), tempo and swing.
+`Ctrl+Y` or `Ctrl+Shift+Z` redoes. The last 50 steps are kept; opening or starting a project clears them.
 
 **FX & Export tab**: master DJ filter, reverb, tempo-synced delay, bitcrusher, and a limiter.
 Export renders the current pattern to a 16-bit WAV offline, exactly as it sounds live.
@@ -85,6 +89,8 @@ Windows only lets one app open a MIDI device at a time, so close it in your DAW 
 - `src/js/engine.js`: state, master FX bus and voice playback (shared by live and offline render)
 - `src/js/sequencer.js`: lookahead clock, live recording, step editing, offline render
 - `src/js/recorder.js`: sampling from mic / loopback / master
+- `src/js/history.js`: app-wide undo/redo snapshots
 - `src/js/project.js`: project save/load
 - `src/js/midi.js`: MIDI input, learn, clock sync in/out, note out, `.mid` export
 - `src/js/app.js`: UI
+

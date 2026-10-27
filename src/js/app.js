@@ -10,6 +10,7 @@ const PATTERN_NAMES = ['A', 'B', 'C', 'D'];
 const $ = (sel) => document.querySelector(sel);
 
 const state = createState();
+const undoHistory = new History(state);
 const engine = new Engine(state);
 const seq = new Sequencer(engine, state);
 const recorder = new SampleRecorder(engine);
@@ -112,7 +113,10 @@ function buildSliders(container, defs, scope, getTarget, defaults, onChange) {
       const s = parseFloat(input.value);
       return d.map ? d.map.from(s) : s;
     };
+    // One undo step per drag or knob turn, per pad.
+    const undoKey = () => `${row.dataset.param}:${scope === 'pad' ? ui.selected : ''}`;
     input.addEventListener('input', () => {
+      undoHistory.push(`Change ${d.label.toLowerCase()}`, undoKey());
       const v = read();
       getTarget()[d.key] = v;
       out.textContent = d.fmt(v);
@@ -123,6 +127,7 @@ function buildSliders(container, defs, scope, getTarget, defaults, onChange) {
       input.blur();
     });
     input.addEventListener('dblclick', () => {
+      undoHistory.push(`Reset ${d.label.toLowerCase()}`);
       getTarget()[d.key] = defaults[d.key];
       refresh();
       onChange(d.key);
@@ -222,7 +227,10 @@ function startPadDrag(e) {
   d.active = true;
   releasePad(d.from);
   // The press that started the drag wasn't meant as a hit.
-  if (d.recorded && seq.undo()) refreshGrid();
+  if (d.recorded) {
+    undoHistory.discardLast();
+    refreshGrid();
+  }
   const src = ui.padEls[d.from];
   const r = src.getBoundingClientRect();
   const p = state.pads[d.from];
@@ -260,6 +268,7 @@ function endPadDrag(copy) {
 
 // Swap two pads (sound, settings and their notes in every pattern), or copy one onto another.
 function movePad(from, to, copy = false) {
+  undoHistory.push(copy ? 'Copy pad' : 'Swap pads');
   const now = engine.ctx.currentTime;
   engine.mixer.cut(from, now);
   engine.mixer.cut(to, now);
@@ -273,7 +282,6 @@ function movePad(from, to, copy = false) {
     [pads[from], pads[to]] = [pads[to], pads[from]];
     const swap = (n) => { if (n.pad === from) n.pad = to; else if (n.pad === to) n.pad = from; };
     for (const pat of state.patterns) pat.notes.forEach(swap);
-    for (const snap of seq.undoStack) snap.notes.forEach(swap);
     toast(`Swapped pads ${from + 1} and ${to + 1}`);
   }
   selectPad(to);
@@ -336,6 +344,8 @@ function setPadBuffer(i, buf, name) {
 // A source is { name, decode: () => Promise<AudioBuffer> }, from a dropped
 // file or the library. Fills pads from `start` onward.
 async function loadSources(sources, start) {
+  if (!sources.length) return;
+  undoHistory.push(sources.length === 1 ? 'Load sample' : 'Load samples');
   let i = start;
   for (const s of sources) {
     if (i >= PAD_COUNT) break;
@@ -442,30 +452,32 @@ function buildEditor() {
     if (!p.buffer || e.button !== 0) return;
     const f = frac(e);
     dragging = Math.abs(f - p.start) <= Math.abs(f - p.end) ? 'start' : 'end';
+    undoHistory.push('Move markers', `markers:${ui.selected}`);
     overlay.setPointerCapture(e.pointerId);
     setMarker(f);
   });
   overlay.addEventListener('pointermove', (e) => { if (dragging) setMarker(frac(e)); });
   overlay.addEventListener('pointerup', () => { dragging = null; });
 
-  const withSample = (fn) => () => {
-    const p = state.pads[ui.selected];
-    if (!p.buffer) return toast('This pad is empty. Load or sample something first.');
-    fn(p);
+  const withSample = (label, fn) => () => {
+    if (!state.pads[ui.selected].buffer) return toast('This pad is empty. Load or sample something first.');
+    undoHistory.push(label);
+    fn(state.pads[ui.selected]);
     refreshPads();
     refreshEditor();
   };
-  $('#btnTrim').addEventListener('click', withSample((p) => {
+  $('#btnTrim').addEventListener('click', withSample('Trim', (p) => {
     p.buffer = DSP.region(p.buffer, p.start, p.end);
     p.start = 0;
     p.end = 1;
   }));
-  $('#btnReverse').addEventListener('click', withSample((p) => {
+  $('#btnReverse').addEventListener('click', withSample('Reverse', (p) => {
     p.buffer = DSP.reverse(p.buffer);
     [p.start, p.end] = [1 - p.end, 1 - p.start];
   }));
-  $('#btnNormalize').addEventListener('click', withSample((p) => { p.buffer = DSP.normalize(p.buffer); }));
+  $('#btnNormalize').addEventListener('click', withSample('Normalize', (p) => { p.buffer = DSP.normalize(p.buffer); }));
   $('#btnClearPad').addEventListener('click', () => {
+    undoHistory.push('Clear pad');
     Object.assign(state.pads[ui.selected], defaultPad());
     refreshPads();
     refreshEditor();
@@ -483,16 +495,19 @@ function buildEditor() {
 
   $('#modeSeg').addEventListener('click', (e) => {
     const b = e.target.closest('button');
-    if (!b) return;
+    if (!b || state.pads[ui.selected].mode === b.dataset.v) return;
+    undoHistory.push('Change play mode');
     state.pads[ui.selected].mode = b.dataset.v;
     refreshEditor();
   });
   $('#btnLoop').addEventListener('click', () => {
+    undoHistory.push('Toggle loop');
     const p = state.pads[ui.selected];
     p.loop = !p.loop;
     refreshEditor();
   });
   $('#choke').addEventListener('change', (e) => {
+    undoHistory.push('Change choke group');
     state.pads[ui.selected].choke = +e.target.value;
   });
 }
@@ -510,6 +525,7 @@ function chop(mode) {
   const overwritten = state.pads.slice(first + 1, first + count).filter((q) => q.buffer).length;
   if (overwritten && !confirm(`Chopping will replace ${overwritten} loaded pad${overwritten > 1 ? 's' : ''}. Continue?`)) return;
 
+  undoHistory.push('Chop');
   const base = p.name || `Pad ${first + 1}`;
   for (let k = 0; k < count; k++) {
     const end = k + 1 < points.length ? points[k + 1] : src.length;
@@ -608,6 +624,7 @@ function buildSequencer() {
     head.innerHTML = `<span class="sw"></span><span>${r + 1}</span><span class="gname"></span><button class="mute" title="Mute this pad in the sequence">M</button>`;
     head.addEventListener('click', (e) => {
       if (e.target.classList.contains('mute')) {
+        undoHistory.push('Toggle mute');
         state.pads[r].mute = !state.pads[r].mute;
         refreshGridHeads();
       } else selectPad(r);
@@ -622,7 +639,7 @@ function buildSequencer() {
       cell.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return;
         const step = ui.page * STEPS_PER_BAR + s;
-        seq.pushUndo();
+        seq.pushUndo('Edit steps');
         paint = !seq.hasStep(r, step);
         seq.setStep(r, step, paint);
         refreshGrid();
@@ -654,7 +671,9 @@ function buildSequencer() {
     ui.follow = !ui.follow;
     refreshGrid();
   });
-  $('#btnUndo').addEventListener('click', undo);
+  $('#btnUndo').addEventListener('click', () => undo());
+  $('#btnRedo').addEventListener('click', () => undo(true));
+  seq.onEdit = (label) => undoHistory.push(label);
   $('#btnClearPadSeq').addEventListener('click', () => {
     seq.clearPad(ui.selected);
     refreshGrid();
@@ -679,11 +698,15 @@ function buildSequencer() {
   };
 }
 
-function undo() {
-  if (seq.undo()) {
-    refreshGrid();
-    refreshTransport();
-  }
+function undo(redo = false) {
+  const prevReverb = state.master.reverbSize;
+  const label = redo ? undoHistory.redo() : undoHistory.undo();
+  if (!label) return toast(redo ? 'Nothing to redo' : 'Nothing to undo');
+  seq.clampTick();
+  engine.mixer.applyMaster(true);
+  if (state.master.reverbSize !== prevReverb) engine.mixer.setReverbSize(state.master.reverbSize);
+  refreshAll();
+  toast(`${redo ? 'Redo' : 'Undo'}: ${label}`);
 }
 
 function refreshGrid() {
@@ -756,6 +779,7 @@ function buildFx() {
   const div = $('#delayDiv');
   for (const k of Object.keys(DELAY_DIVISIONS)) div.add(new Option(k, k));
   div.addEventListener('change', () => {
+    undoHistory.push('Change delay time');
     state.master.delayDiv = div.value;
     engine.mixer.applyMaster(true);
   });
@@ -975,6 +999,7 @@ function buildTransport() {
     if (taps.length >= 2) setBpm(Math.round(60000 / ((taps[taps.length - 1] - taps[0]) / (taps.length - 1))));
   });
   $('#swing').addEventListener('input', (e) => {
+    undoHistory.push('Change swing', 'swing');
     state.swing = +e.target.value;
     refreshTransport();
   });
@@ -1000,7 +1025,10 @@ function togglePlay() {
 // precise keeps two decimals, for tempos coming from an external MIDI clock.
 function setBpm(v, precise = false) {
   const rounded = precise ? Math.round(v * 100) / 100 : Math.round(v);
-  state.bpm = Math.max(40, Math.min(250, rounded || state.bpm));
+  const bpm = Math.max(40, Math.min(250, rounded || state.bpm));
+  // Tempo coming from MIDI clock isn't an edit, so it isn't undoable.
+  if (!precise && bpm !== state.bpm) undoHistory.push('Change tempo', 'bpm');
+  state.bpm = bpm;
   engine.mixer.applyMaster(true);
   refreshTransport();
 }
@@ -1028,6 +1056,7 @@ async function toggleSampling() {
     const buf = await recorder.stop();
     if (!buf) return toast('Nothing recorded. The input was silent.');
     ui.sampleCount++;
+    undoHistory.push('Record sample');
     setPadBuffer(ui.recTarget, buf, `Sample ${ui.sampleCount}`);
     refreshPads();
     if (ui.selected === ui.recTarget) refreshEditor();
@@ -1076,7 +1105,7 @@ async function openProject() {
 }
 
 function afterProjectLoad() {
-  seq.undoStack = [];
+  undoHistory.clear();
   seq.queued = null;
   engine.mixer.applyMaster(true);
   engine.mixer.setReverbSize(state.master.reverbSize);
@@ -1099,7 +1128,8 @@ function bindKeys() {
     }
     if (typing(e.target)) return;
     if (e.code === 'Escape' && ui.learn) { setLearn(false); return; }
-    if (e.ctrlKey && e.code === 'KeyZ') { e.preventDefault(); undo(); return; }
+    if (e.ctrlKey && e.code === 'KeyZ') { e.preventDefault(); undo(e.shiftKey); return; }
+    if (e.ctrlKey && e.code === 'KeyY') { e.preventDefault(); undo(true); return; }
     if (e.ctrlKey && e.code === 'KeyS') { e.preventDefault(); saveProject(); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) togglePlay(); return; }

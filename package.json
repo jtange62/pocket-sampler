@@ -1,7 +1,7 @@
 {
   "name": "pocket-sampler",
   "productName": "Pocket Sampler",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A 16-pad sampler and sequencer for Windows",
   "main": "main.js",
   "scripts": {
