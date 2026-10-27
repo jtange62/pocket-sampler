@@ -213,6 +213,35 @@ main {
 .cell.on { background: hsl(var(--hue) 70% 58%); }
 .cell.ph { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.75); }
 
+/* MIDI */
+#btnLearn { display: inline-flex; align-items: center; gap: 7px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: #3a3e4a; transition: background 0.15s; }
+.dot.on { background: var(--ok); transition: none; }
+.learning .param { outline: 1px dashed #5a6070; outline-offset: 3px; border-radius: 4px; cursor: crosshair; }
+.learning .param input { pointer-events: none; }
+.learning .param.learn-target { outline: 2px solid var(--accent); }
+.pname .cc {
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  background: #2f3a50;
+  color: #9fc3ff;
+}
+.pname .cc:empty { display: none; }
+.maplist { display: flex; flex-direction: column; gap: 4px; }
+.maplist .map {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px 4px 10px;
+  background: var(--panel-2);
+  border-radius: 6px;
+}
+.maplist .map span:first-child { color: #9fc3ff; min-width: 110px; font-variant-numeric: tabular-nums; }
+.maplist .map span:nth-child(2) { flex: 1; }
+.maplist .map button { padding: 0 8px; }
+
 /* Toast */
 #toast {
   position: fixed;

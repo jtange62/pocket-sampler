@@ -28,12 +28,45 @@ const SMOKE_TEST = `(async () => {
   await new Promise((r) => setTimeout(r, 700));
   const tickWhilePlaying = seq.currentTickFloat();
   seq.stop();
+
+  // MIDI: a pad note, a learned CC, a .mid export and following a 120 BPM clock.
+  engine.mixer.last[0] = null;
+  midi.handleMessage([0x90, midi.settings.base, 100], performance.now());
+  midi.handleMessage([0x80, midi.settings.base, 0], performance.now());
+  const midiPadHit = !!engine.mixer.last[0];
+  const savedMappings = midi.settings.mappings;
+  midi.settings.mappings = { '0:7': 'master.volume' };
+  midi.handleMessage([0xb0, 7, 127], performance.now());
+  const ccVolume = state.master.volume;
+  midi.settings.mappings = savedMappings;
+  const mid = MidiFile.encodePattern(seq, state, midi.settings, 2, 'smoke');
+  const midHeader = String.fromCharCode(...mid.slice(0, 4)) + String.fromCharCode(...mid.slice(14, 18));
+
+  midi.settings.clockIn = true;
+  const interval = 60000 / 120 / 24, t0 = performance.now() + 20;
+  midi.handleMessage([0xfa], t0 - 5);
+  let n = 0;
+  await new Promise((done) => {
+    const pump = () => {
+      while (t0 + n * interval <= performance.now()) midi.handleMessage([0xf8], t0 + n++ * interval);
+      if (n < 24 * 8) setTimeout(pump, 2); else done();
+    };
+    pump();
+  });
+  const beat = Math.floor((n - 1) / 24);
+  const scheduled = seq.history.find((h) => h.abs === beat * 16);
+  const expected = midi.perfToAudio(t0 + beat * 24 * interval);
+  const clockSync = { bpm: state.bpm, playing: seq.playing, phaseErrorMs: scheduled ? Math.round((scheduled.time - expected) * 1000 * 10) / 10 : null };
+  midi.handleMessage([0xfc], performance.now());
+  midi.settings.clockIn = false;
+  clockSync.stoppedByClock = !seq.playing;
   const json = Project.serialize(state);
   Project.load(json, state);
   refreshAll();
   return { renderedSeconds: out.duration, peak, wavBytes: wav.byteLength, onsets: onsets.length,
     projectBytes: json.length, padRestored: !!state.pads[0].buffer, notes: seq.pattern.notes.length,
-    tickWhilePlaying, ctxState: engine.ctx.state };
+    tickWhilePlaying, ctxState: engine.ctx.state,
+    midiAccess: !!midi.access, midiPadHit, ccVolume, midHeader, midBytes: mid.length, clockSync };
 })()`;
 
 function createWindow() {

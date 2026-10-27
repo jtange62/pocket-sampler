@@ -15,6 +15,7 @@ class Sequencer {
     this.playing = false;
     this.recording = false;
     this.tick = 0;
+    this.absTick = 0; // ticks since play, never wraps (MIDI clock sync)
     this.nextTime = 0;
     this.history = [];
     this.queued = null;
@@ -22,6 +23,9 @@ class Sequencer {
     this.recHeld = new Map();
     this.timer = null;
     this.onNote = null;
+    this.onTick = null;
+    this.onPlay = null;
+    this.onStop = null;
     this.onPatternChange = null;
   }
 
@@ -38,13 +42,15 @@ class Sequencer {
     return (this.state.swing / 100 - 0.5) * 2 * this.secPerTick() * TICKS_PER_STEP;
   }
 
-  play() {
+  play(startTime = null) {
     if (this.playing) return;
     this.engine.resume();
     this.playing = true;
     this.tick = 0;
+    this.absTick = 0;
     this.history = [];
-    this.nextTime = this.engine.ctx.currentTime + 0.06;
+    this.nextTime = startTime ?? this.engine.ctx.currentTime + 0.06;
+    if (this.onPlay) this.onPlay(this.nextTime);
     this.pump();
     this.timer = setInterval(() => this.pump(), 20);
   }
@@ -62,6 +68,7 @@ class Sequencer {
     }
     for (const n of this.pattern.notes) delete n.skip;
     this.engine.stopAll();
+    if (this.onStop) this.onStop();
   }
 
   pump() {
@@ -72,12 +79,35 @@ class Sequencer {
         this.queued = null;
         if (this.onPatternChange) this.onPatternChange();
       }
+      const spt = this.secPerTick();
       this.scheduleTick(this.tick, this.nextTime);
-      this.history.push({ tick: this.tick, time: this.nextTime });
+      this.history.push({ tick: this.tick, abs: this.absTick, time: this.nextTime });
       if (this.history.length > 256) this.history.shift();
-      this.nextTime += this.secPerTick();
+      if (this.onTick) this.onTick(this.absTick, this.nextTime, spt);
+      this.nextTime += spt;
       this.tick = (this.tick + 1) % this.totalTicks;
+      this.absTick++;
     }
+  }
+
+  // Phase-lock to an external MIDI clock: compare when tick `abs` was scheduled
+  // with when the master says it happened, and pull the clock part way back.
+  nudge(abs, heardTime) {
+    if (!this.playing) return;
+    if (abs >= this.absTick) {
+      // We're behind the master: skip ahead silently instead of bursting notes.
+      while (this.absTick < abs) {
+        this.absTick++;
+        this.tick = (this.tick + 1) % this.totalTicks;
+      }
+      this.nextTime = heardTime;
+      return;
+    }
+    const e = this.history.find((h) => h.abs === abs);
+    if (!e) return;
+    const err = e.time - heardTime;
+    this.nextTime -= Math.abs(err) > 0.25 ? err : err * 0.5;
+    this.nextTime = Math.max(this.nextTime, this.engine.ctx.currentTime);
   }
 
   scheduleTick(tick, time) {
@@ -88,7 +118,7 @@ class Sequencer {
       if (this.state.pads[n.pad].mute) continue;
       const t = time + this.swingDelay(tick);
       this.engine.mixer.playPad(n.pad, t, n.vel, n.len * spt);
-      if (this.onNote) this.onNote(n.pad, t);
+      if (this.onNote) this.onNote(n.pad, t, n.vel, n.len * spt);
     }
     if (this.state.metronome && tick % (TICKS_PER_BAR / 4) === 0) this.engine.click(time, tick % TICKS_PER_BAR === 0);
   }

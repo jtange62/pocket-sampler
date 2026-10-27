@@ -1,7 +1,7 @@
 {
   "name": "pocket-sampler",
   "productName": "Pocket Sampler",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A 16-pad sampler and sequencer for Windows",
   "main": "main.js",
   "scripts": {
@@ -28,8 +28,18 @@
     "win": {
       "icon": "build/icon.ico",
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "nsis": {

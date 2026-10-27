@@ -30,7 +30,8 @@
       <span id="sampleStatus"></span>
     </div>
     <div class="group right">
-      <canvas id="meter" width="120" height="12" title="Master level"></canvas>
+      <canvas id="meter" width="80" height="12" title="Master level"></canvas>
+      <button id="btnLearn" title="MIDI learn: click a slider, then move a knob on your controller. The light shows incoming MIDI."><span id="midiDot" class="dot"></span>LEARN</button>
       <button id="btnNew">New</button>
       <button id="btnOpen">Open</button>
       <button id="btnSave" title="Save project (Ctrl+S)">Save</button>
@@ -48,6 +49,7 @@
         <button data-tab="edit" class="active">Sample</button>
         <button data-tab="seq">Sequence</button>
         <button data-tab="fx">FX &amp; Export</button>
+        <button data-tab="midi">MIDI</button>
       </nav>
 
       <div id="tab-edit" class="tab active">
@@ -119,8 +121,46 @@
           <label class="lbl">Loops <select id="exportLoops"><option>1</option><option>2</option><option selected>4</option><option>8</option></select></label>
           <label class="lbl"><input type="checkbox" id="exportTail" checked> Include FX tail</label>
           <button id="btnExport">Export pattern as WAV…</button>
+          <button id="btnExportMidi">Export as MIDI…</button>
         </div>
-        <p class="hint">Renders the current pattern offline with all pad and master FX. Muted pads are left out.</p>
+        <p class="hint">WAV renders the current pattern offline with all pad and master FX. MIDI writes its notes
+          (pad 1 = the pad note set on the MIDI tab) to drag into a DAW. Muted pads are left out of both.</p>
+      </div>
+
+      <div id="tab-midi" class="tab">
+        <h3>Devices</h3>
+        <div class="row">
+          <label class="lbl">Input <select id="midiIn"></select></label>
+          <label class="lbl">Output <select id="midiOut"></select></label>
+        </div>
+        <p class="hint" id="midiStatus"></p>
+
+        <h3>Pads</h3>
+        <div class="row">
+          <label class="lbl">Pad 1 note <input id="midiBase" type="number" min="0" max="112" step="1"></label>
+          <span class="hint" id="midiBaseHint"></span>
+        </div>
+
+        <h3>Sync</h3>
+        <div class="row">
+          <label class="lbl"><input type="checkbox" id="midiClockIn"> Follow incoming MIDI clock (tempo, start and stop)</label>
+          <label class="lbl">Offset <input id="midiOffset" type="number" min="-250" max="250" step="1"> ms</label>
+        </div>
+        <div class="row">
+          <label class="lbl"><input type="checkbox" id="midiClockOut"> Send MIDI clock</label>
+          <label class="lbl"><input type="checkbox" id="midiNotesOut"> Send sequencer notes</label>
+          <label class="lbl">on channel <select id="midiOutCh"></select></label>
+        </div>
+        <p class="hint">To sync with a DAW on this PC, install loopMIDI (free), create a port, and pick it here and in the DAW.</p>
+
+        <h3>MIDI learn</h3>
+        <div class="row">
+          <span class="hint">Press <b>LEARN</b> in the top bar, click any slider, then move a knob or fader.
+            Pad sliders control whichever pad is selected.</span>
+          <span class="spacer"></span>
+          <button id="btnClearMappings" class="danger">Clear all</button>
+        </div>
+        <div id="midiMappings" class="maplist"></div>
       </div>
     </section>
   </main>
@@ -132,6 +172,7 @@
   <script src="js/sequencer.js"></script>
   <script src="js/recorder.js"></script>
   <script src="js/project.js"></script>
+  <script src="js/midi.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

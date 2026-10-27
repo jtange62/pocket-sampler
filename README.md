@@ -52,6 +52,20 @@ current pattern there. Changing patterns while playing switches at the end of th
 **FX & Export tab**: master DJ filter, reverb, tempo-synced delay, bitcrusher, and a limiter.
 Export renders the current pattern to a 16-bit WAV offline, exactly as it sounds live.
 
+**MIDI tab**:
+
+- *Controllers*: any USB MIDI controller plays the pads with velocity. Pads 1–16 respond to notes
+  36–51 by default (standard drum-pad layout); change "Pad 1 note" to shift the range.
+- *MIDI learn*: press **LEARN** in the top bar, click a slider, move a knob or fader. Mapped sliders
+  show a `CC` badge. Pad sliders follow whichever pad is selected. Mappings are saved on this PC.
+- *Clock sync*: "Follow incoming MIDI clock" takes tempo and start/stop from a DAW or drum machine
+  and phase-locks to it; use "Offset" to fine-tune if it sounds early or late. "Send MIDI clock"
+  makes other gear follow this app. "Send sequencer notes" plays the patterns out to a synth or DAW.
+  For a DAW on the same PC, create a virtual port with [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html).
+- *Export as MIDI* (FX & Export tab) writes the pattern as a `.mid` file to drag into a DAW.
+
+Windows only lets one app open a MIDI device at a time, so close it in your DAW to use it here.
+
 **Projects**: `Save` / `Open` write `.psmp` files containing every sample and setting.
 
 ## Layout
@@ -62,4 +76,5 @@ Export renders the current pattern to a 16-bit WAV offline, exactly as it sounds
 - `src/js/sequencer.js`: lookahead clock, live recording, step editing, offline render
 - `src/js/recorder.js`: sampling from mic / loopback / master
 - `src/js/project.js`: project save/load
+- `src/js/midi.js`: MIDI input, learn, clock sync in/out, note out, `.mid` export
 - `src/js/app.js`: UI

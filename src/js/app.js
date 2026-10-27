@@ -13,6 +13,7 @@ const state = createState();
 const engine = new Engine(state);
 const seq = new Sequencer(engine, state);
 const recorder = new SampleRecorder(engine);
+const midi = new MidiManager(engine, seq);
 
 const ui = {
   selected: 0,
@@ -28,6 +29,10 @@ const ui = {
   peakCache: new WeakMap(),
   refreshPadParams: null,
   refreshMasterParams: null,
+  sliders: new Map(), // "pad.gain" / "master.volume" -> { label, row, setNorm }
+  learn: false,
+  learnTarget: null,
+  midiDotTimer: null,
 };
 
 const fmtPct = (v) => `${Math.round(v * 100)}%`;
@@ -89,11 +94,13 @@ function fitCanvas(canvas) {
 
 // ---------- Sliders ----------
 
-function buildSliders(container, defs, getTarget, defaults, onChange) {
+// scope ("pad" or "master") namespaces each slider's id for MIDI learn.
+function buildSliders(container, defs, scope, getTarget, defaults, onChange) {
   const rows = defs.map((d) => {
     const row = document.createElement('label');
     row.className = 'param';
-    row.innerHTML = `<span class="pname">${d.label}</span><input type="range" min="${d.min}" max="${d.max}" step="${d.step ?? 1}"><span class="pval"></span>`;
+    row.dataset.param = `${scope}.${d.key}`;
+    row.innerHTML = `<span class="pname">${d.label}<span class="cc"></span></span><input type="range" min="${d.min}" max="${d.max}" step="${d.step ?? 1}"><span class="pval"></span>`;
     const input = row.querySelector('input');
     const out = row.querySelector('.pval');
     const read = () => {
@@ -114,6 +121,20 @@ function buildSliders(container, defs, getTarget, defaults, onChange) {
       getTarget()[d.key] = defaults[d.key];
       refresh();
       onChange(d.key);
+    });
+    let commitTimer = null;
+    ui.sliders.set(row.dataset.param, {
+      label: `${scope === 'pad' ? 'Selected pad' : 'Master'} · ${d.label}`,
+      row,
+      // Drive the slider from a controller (0–1), as if the user dragged it.
+      setNorm(n) {
+        input.value = String(+d.min + n * (d.max - d.min));
+        input.dispatchEvent(new Event('input'));
+        if (d.commit) {
+          clearTimeout(commitTimer);
+          commitTimer = setTimeout(() => onChange(d.key), 150);
+        }
+      },
     });
     container.appendChild(row);
     return { d, input, out };
@@ -238,7 +259,7 @@ async function loadFilesToPads(files, start) {
 // ---------- Sample editor ----------
 
 function buildEditor() {
-  ui.refreshPadParams = buildSliders($('#padParams'), PAD_PARAMS, () => state.pads[ui.selected], defaultPad(), (key) => {
+  ui.refreshPadParams = buildSliders($('#padParams'), PAD_PARAMS, 'pad', () => state.pads[ui.selected], defaultPad(), (key) => {
     if (key === 'cutoff' || key === 'resonance') return;
     drawMini(ui.selected);
   });
@@ -506,9 +527,13 @@ function buildSequencer() {
     refreshTransport();
   });
 
-  seq.onNote = (pad, time) => {
+  seq.onNote = (pad, time, vel, dur) => {
     setTimeout(() => flashPad(pad), Math.max(0, (time - engine.ctx.currentTime) * 1000));
+    midi.sendNote(pad, time, vel, dur);
   };
+  seq.onTick = (abs, time, spt) => midi.sendClockForTick(abs, time, spt);
+  seq.onPlay = (time) => midi.sendStart(time);
+  seq.onStop = () => midi.sendStop();
   seq.onPatternChange = () => {
     refreshGrid();
     refreshTransport();
@@ -585,7 +610,7 @@ function drawGridPlayhead() {
 // ---------- FX & export ----------
 
 function buildFx() {
-  ui.refreshMasterParams = buildSliders($('#masterParams'), MASTER_PARAMS, () => state.master, createState().master, (key) => {
+  ui.refreshMasterParams = buildSliders($('#masterParams'), MASTER_PARAMS, 'master', () => state.master, createState().master, (key) => {
     if (key === 'reverbSize') engine.mixer.setReverbSize(state.master.reverbSize);
     else engine.mixer.applyMaster(true);
   });
@@ -614,6 +639,154 @@ function buildFx() {
       btn.textContent = 'Export pattern as WAV…';
     }
   });
+
+  $('#btnExportMidi').addEventListener('click', async () => {
+    if (!seq.pattern.notes.length) return toast('This pattern is empty. Add some notes first.');
+    const label = `Pattern ${PATTERN_NAMES[state.currentPattern]}`;
+    const bytes = MidiFile.encodePattern(seq, state, midi.settings, +$('#exportLoops').value, label);
+    const name = `pattern-${PATTERN_NAMES[state.currentPattern]}-${state.bpm}bpm.mid`;
+    await saveWithDialog({ title: 'Export MIDI', defaultPath: name, filters: [{ name: 'MIDI file', extensions: ['mid'] }] }, bytes);
+  });
+}
+
+// ---------- MIDI ----------
+
+function buildMidi() {
+  const s = midi.settings;
+  const save = () => midi.saveSettings();
+  const inSel = $('#midiIn'), outSel = $('#midiOut'), chSel = $('#midiOutCh');
+  for (let c = 0; c < 16; c++) chSel.add(new Option(String(c + 1), String(c)));
+
+  inSel.addEventListener('change', () => { s.input = inSel.value; midi.bindInputs(); save(); });
+  outSel.addEventListener('change', () => { s.output = outSel.value; save(); });
+  chSel.addEventListener('change', () => { s.channel = +chSel.value; save(); });
+  const base = $('#midiBase');
+  base.addEventListener('change', () => {
+    s.base = Math.max(0, Math.min(112, Math.round(+base.value) || 0));
+    save();
+    refreshMidi();
+  });
+  const offset = $('#midiOffset');
+  offset.addEventListener('change', () => {
+    s.offsetMs = Math.max(-250, Math.min(250, Math.round(+offset.value) || 0));
+    save();
+    refreshMidi();
+  });
+  for (const [id, key] of [['#midiClockIn', 'clockIn'], ['#midiClockOut', 'clockOut'], ['#midiNotesOut', 'notesOut']]) {
+    $(id).addEventListener('change', (e) => { s[key] = e.target.checked; save(); });
+  }
+
+  $('#btnLearn').addEventListener('click', () => setLearn(!ui.learn));
+  $('#btnClearMappings').addEventListener('click', () => {
+    s.mappings = {};
+    save();
+    refreshMidiMappings();
+  });
+  $('#midiMappings').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    midi.unmap(b.dataset.key);
+    refreshMidiMappings();
+  });
+  // In learn mode a click on a slider row picks it as the target instead of moving it.
+  document.addEventListener('click', (e) => {
+    if (!ui.learn) return;
+    const row = e.target.closest('.param');
+    if (!row) return;
+    e.preventDefault();
+    ui.learnTarget = row.dataset.param;
+    document.querySelectorAll('.param.learn-target').forEach((r) => r.classList.remove('learn-target'));
+    row.classList.add('learn-target');
+  }, true);
+
+  midi.onNoteOn = (pad, vel) => hitPad(pad, vel);
+  midi.onNoteOff = (pad) => releasePad(pad);
+  midi.onCC = handleCC;
+  midi.onActivity = () => {
+    const dot = $('#midiDot');
+    dot.classList.add('on');
+    clearTimeout(ui.midiDotTimer);
+    ui.midiDotTimer = setTimeout(() => dot.classList.remove('on'), 90);
+  };
+  midi.onDevicesChange = refreshMidi;
+  midi.onTransport = (cmd, time) => {
+    if (seq.playing) seq.stop();
+    if (cmd === 'start') seq.play(Math.max(time, engine.ctx.currentTime + 0.005));
+    refreshTransport();
+    refreshGrid();
+  };
+  midi.onTempo = (bpm) => {
+    if (Math.abs(bpm - state.bpm) > 0.05) setBpm(bpm, true);
+  };
+}
+
+function setLearn(on) {
+  ui.learn = on;
+  ui.learnTarget = null;
+  document.body.classList.toggle('learning', on);
+  $('#btnLearn').classList.toggle('active', on);
+  document.querySelectorAll('.param.learn-target').forEach((r) => r.classList.remove('learn-target'));
+  if (on) toast('MIDI learn: click a slider, then move a knob or fader. Press Esc or LEARN when done.');
+}
+
+function handleCC(ch, cc, value) {
+  const key = `${ch}:${cc}`;
+  if (ui.learn && ui.learnTarget) {
+    midi.map(key, ui.learnTarget);
+    refreshMidiMappings();
+    toast(`CC ${cc} → ${ui.sliders.get(ui.learnTarget).label}`);
+    return;
+  }
+  const slider = ui.sliders.get(midi.settings.mappings[key]);
+  if (slider) slider.setNorm(value / 127);
+}
+
+function fillDeviceSelect(sel, ports, noneOption, current) {
+  sel.innerHTML = '';
+  sel.add(new Option(noneOption.label, noneOption.value));
+  for (const p of ports) sel.add(new Option(p.name, p.id));
+  if (current !== noneOption.value && !ports.some((p) => p.id === current)) {
+    sel.add(new Option('(saved device not connected)', current));
+  }
+  sel.value = current;
+}
+
+function refreshMidi() {
+  const s = midi.settings;
+  fillDeviceSelect($('#midiIn'), midi.inputs, { label: 'All inputs', value: 'all' }, s.input);
+  fillDeviceSelect($('#midiOut'), midi.outputs, { label: 'None', value: 'none' }, s.output);
+  $('#midiOutCh').value = String(s.channel);
+  if (document.activeElement !== $('#midiBase')) $('#midiBase').value = s.base;
+  if (document.activeElement !== $('#midiOffset')) $('#midiOffset').value = s.offsetMs;
+  $('#midiBaseHint').textContent = `Pads 1–16 respond to notes ${s.base}–${s.base + 15} (${midiNoteName(s.base)}–${midiNoteName(s.base + 15)}). 36 is the standard drum-pad layout.`;
+  $('#midiClockIn').checked = s.clockIn;
+  $('#midiClockOut').checked = s.clockOut;
+  $('#midiNotesOut').checked = s.notesOut;
+  const n = midi.inputs.length, m = midi.outputs.length;
+  $('#midiStatus').textContent = !midi.access
+    ? 'MIDI is unavailable.'
+    : n + m === 0
+      ? 'No MIDI devices found. Plug in a controller; it shows up here automatically.'
+      : `${n} input${n === 1 ? '' : 's'}, ${m} output${m === 1 ? '' : 's'} connected. A device in use by another app (e.g. your DAW) can't be opened here at the same time.`;
+  refreshMidiMappings();
+}
+
+function refreshMidiMappings() {
+  for (const { row } of ui.sliders.values()) row.querySelector('.cc').textContent = '';
+  const list = $('#midiMappings');
+  list.innerHTML = '';
+  const entries = Object.entries(midi.settings.mappings);
+  for (const [key, id] of entries) {
+    const slider = ui.sliders.get(id);
+    if (!slider) continue;
+    const [ch, cc] = key.split(':').map(Number);
+    slider.row.querySelector('.cc').textContent = `CC${cc}`;
+    const item = document.createElement('div');
+    item.className = 'map';
+    item.innerHTML = `<span>CC ${cc} · ch ${ch + 1}</span><span>${slider.label}</span><button data-key="${key}" title="Remove">×</button>`;
+    list.appendChild(item);
+  }
+  if (!entries.length) list.innerHTML = '<span class="hint">No mappings yet.</span>';
 }
 
 function refreshFx() {
@@ -685,8 +858,10 @@ function togglePlay() {
   refreshGrid();
 }
 
-function setBpm(v) {
-  state.bpm = Math.max(40, Math.min(250, Math.round(v) || state.bpm));
+// precise keeps two decimals, for tempos coming from an external MIDI clock.
+function setBpm(v, precise = false) {
+  const rounded = precise ? Math.round(v * 100) / 100 : Math.round(v);
+  state.bpm = Math.max(40, Math.min(250, rounded || state.bpm));
   engine.mixer.applyMaster(true);
   refreshTransport();
 }
@@ -776,6 +951,7 @@ function bindKeys() {
   const typing = (el) => el.tagName === 'INPUT' && (el.type === 'number' || el.type === 'text');
   window.addEventListener('keydown', (e) => {
     if (typing(e.target)) return;
+    if (e.code === 'Escape' && ui.learn) { setLearn(false); return; }
     if (e.ctrlKey && e.code === 'KeyZ') { e.preventDefault(); undo(); return; }
     if (e.ctrlKey && e.code === 'KeyS') { e.preventDefault(); saveProject(); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -849,10 +1025,17 @@ async function main() {
   buildSequencer();
   buildFx();
   buildTransport();
+  buildMidi();
   bindKeys();
   selectPad(0);
   refreshAll();
   requestAnimationFrame(frame);
+  try {
+    await midi.init();
+  } catch (err) {
+    console.warn('MIDI unavailable:', err);
+  }
+  refreshMidi();
 }
 
 main().catch((err) => {
