@@ -35,6 +35,13 @@ The builds are unsigned, so Windows SmartScreen shows "Windows protected your PC
 several files fills consecutive pads. Drag a pad onto another to swap them (their notes in every
 pattern move too, so the beat sounds the same); hold Ctrl when dropping to copy instead.
 
+**Library** (☰ or `Ctrl+B`): a browser for your sample folders. Your Music folder is added by
+default; **+ Folder** adds more (they're remembered). Expand folders, or search every folder at once
+(`Ctrl+F`). Selecting a sample previews it (toggle **Auto-preview**; click the waveform to play from a
+point). Double-click or `Enter` loads into the selected pad; drag a sample onto any pad, or drag a
+whole folder to load it as a kit across consecutive pads. Arrow keys navigate (←/→ collapse/expand).
+The app can only read audio files inside the folders you've added.
+
 **Sampling**: pick a source in the top bar, select a pad, press **● SAMPLE**, press again to stop.
 
 - *Mic / line in*: any Windows input device (leading/trailing silence is trimmed).
@@ -72,6 +79,8 @@ Windows only lets one app open a MIDI device at a time, so close it in your DAW 
 ## Layout
 
 - `main.js`, `preload.js`: Electron window, file dialogs, system-audio capture
+- `library.js`: sample library folders, listing, search index, sandboxed file reads (main process)
+- `src/js/browser.js`: library browser sidebar and previews
 - `src/js/dsp.js`: worklets (bitcrusher, recorder), buffer edits, transient detection, WAV encoding
 - `src/js/engine.js`: state, master FX bus and voice playback (shared by live and offline render)
 - `src/js/sequencer.js`: lookahead clock, live recording, step editing, offline render

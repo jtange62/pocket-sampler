@@ -8,6 +8,7 @@
 </head>
 <body>
   <header class="topbar">
+    <button id="btnBrowser" class="tbtn" title="Sample library (Ctrl+B)">☰</button>
     <div class="group">
       <button id="btnPlay" class="tbtn" title="Play / Stop (Space)">▶</button>
       <button id="btnRec" class="tbtn" title="Record into the pattern: pads you hit while playing are written in">●</button>
@@ -39,6 +40,25 @@
   </header>
 
   <main>
+    <aside class="browser">
+      <div class="bhead">
+        <span class="btitle">Library</span>
+        <button id="bAdd" title="Add a folder of samples">+ Folder</button>
+        <button id="bRefresh" title="Rescan folders">⟳</button>
+      </div>
+      <input id="bSearch" type="search" placeholder="Search all folders (Ctrl+F)" spellcheck="false">
+      <div id="bList" class="blist" tabindex="0"></div>
+      <div class="bpreview">
+        <div id="bPreviewName" class="bpname">Click a sample to preview it</div>
+        <canvas id="bWave" title="Click to play from here"></canvas>
+        <div class="bpctl">
+          <button id="bAuto" title="Play samples when you select them">Auto-preview</button>
+          <input id="bVol" type="range" min="0" max="1" step="0.01" title="Preview volume">
+        </div>
+        <div class="hint">Double-click or Enter loads into the selected pad. Drag onto any pad; drag a folder to load a kit.</div>
+      </div>
+    </aside>
+
     <section class="pads-area">
       <div id="pads" class="pads"></div>
       <div class="hint">Keys 1–4 · Q–R · A–F · Z–V &nbsp;·&nbsp; drop audio files on a pad<br>Drag a pad onto another to swap (hold Ctrl to copy)</div>
@@ -173,6 +193,7 @@
   <script src="js/recorder.js"></script>
   <script src="js/project.js"></script>
   <script src="js/midi.js"></script>
+  <script src="js/browser.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

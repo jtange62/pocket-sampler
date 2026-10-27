@@ -223,6 +223,66 @@ main {
 .cell.on { background: hsl(var(--hue) 70% 58%); }
 .cell.ph { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.75); }
 
+/* Library browser */
+main.with-browser { grid-template-columns: 250px auto minmax(0, 1fr); }
+main.with-browser .pads { width: min(540px, calc(100vh - 140px), calc(100vw - 880px)); }
+.browser { display: none; }
+main.with-browser .browser {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.bhead { display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; border-bottom: 1px solid var(--line); }
+.btitle { font-weight: 600; flex: 1; }
+.bhead button { padding: 3px 8px; font-size: 12px; }
+#bSearch {
+  margin: 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+#bSearch:focus { outline: 1px solid var(--accent); }
+.blist { flex: 1; overflow: auto; outline: none; padding-bottom: 6px; }
+.brow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  margin: 0 4px;
+  padding-right: 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  font-size: 12px;
+  cursor: default;
+}
+.brow:hover { background: #22252e; }
+.brow.sel { background: #2d3442; }
+.blist:focus .brow.sel { background: #35507a; }
+.brow.loading { color: var(--muted); font-style: italic; }
+.brow .caret { width: 12px; flex: none; text-align: center; font-size: 10px; color: var(--muted); }
+.brow .bname { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #cfd3dc; }
+.brow.dir .bname { color: var(--text); }
+.brow.root .bname { font-weight: 600; }
+.brow .bsub { margin-left: auto; padding-left: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11px; color: var(--muted); }
+.bremove { display: none; margin-left: auto; padding: 0 6px; font-size: 12px; line-height: 16px; }
+.brow.root:hover .bremove { display: block; }
+.bempty { padding: 16px 12px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.bempty button { margin-top: 8px; }
+.bpreview { border-top: 1px solid var(--line); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.bpname { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bWave { width: 100%; height: 48px; background: #0e0f14; border-radius: 6px; cursor: pointer; }
+.bpctl { display: flex; align-items: center; gap: 8px; }
+.bpctl button { padding: 3px 8px; font-size: 12px; }
+.bpreview .hint { font-size: 11px; line-height: 1.4; }
+
 /* MIDI */
 #btnLearn { display: inline-flex; align-items: center; gap: 7px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: #3a3e4a; transition: background 0.15s; }

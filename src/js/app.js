@@ -14,6 +14,10 @@ const engine = new Engine(state);
 const seq = new Sequencer(engine, state);
 const recorder = new SampleRecorder(engine);
 const midi = new MidiManager(engine, seq);
+const browser = new SampleBrowser(engine, {
+  onLoad: (items) => loadLibraryItems(items, ui.selected),
+  toast: (msg, isError) => toast(msg, isError),
+});
 
 const ui = {
   selected: 0,
@@ -186,12 +190,16 @@ function buildPads() {
       endPadDrag(false);
       releasePad(i);
     });
-    el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('drop'); });
+    el.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      el.classList.add('drop');
+    });
     el.addEventListener('dragleave', () => el.classList.remove('drop'));
     el.addEventListener('drop', (e) => {
       e.preventDefault();
       el.classList.remove('drop');
-      loadFilesToPads([...e.dataTransfer.files], i);
+      loadDrop(e.dataTransfer, i);
     });
     wrap.appendChild(el);
     ui.padEls.push(el);
@@ -325,22 +333,62 @@ function setPadBuffer(i, buf, name) {
   p.end = 1;
 }
 
-async function loadFilesToPads(files, start) {
+// A source is { name, decode: () => Promise<AudioBuffer> }, from a dropped
+// file or the library. Fills pads from `start` onward.
+async function loadSources(sources, start) {
   let i = start;
-  for (const f of files) {
+  for (const s of sources) {
     if (i >= PAD_COUNT) break;
     try {
-      const buf = await engine.ctx.decodeAudioData(await f.arrayBuffer());
-      setPadBuffer(i, buf, f.name.replace(/\.[^.]+$/, ''));
+      setPadBuffer(i, await s.decode(), s.name.replace(/\.[^.]+$/, ''));
       i++;
     } catch (err) {
-      toast(`Couldn't read ${f.name} as audio`, true);
+      toast(`Couldn't read ${s.name} as audio`, true);
     }
   }
   if (i > start) toast(i - start === 1 ? `Loaded into pad ${start + 1}` : `Loaded ${i - start} samples into pads ${start + 1}–${i}`);
   refreshPads();
   refreshEditor();
   refreshGridHeads();
+}
+
+function fileSource(file) {
+  return { name: file.name, decode: async () => engine.ctx.decodeAudioData(await file.arrayBuffer()) };
+}
+
+function loadFilesToPads(files, start) {
+  return loadSources(files.map(fileSource), start);
+}
+
+// Library items are files or folders; a folder loads its samples as a kit.
+async function loadLibraryItems(items, start) {
+  const files = [];
+  for (const it of items) {
+    if (!it.dir) files.push(it);
+    else {
+      try {
+        files.push(...(await window.native.library.list(it.path)).filter((k) => !k.dir));
+      } catch (err) {
+        toast(`Couldn't open ${it.name}: ${err.message}`, true);
+      }
+    }
+  }
+  if (!files.length) return toast('No samples in that folder.');
+  return loadSources(files.map((f) => ({ name: f.name, decode: () => browser.getBuffer(f.path) })), start);
+}
+
+function loadDrop(dataTransfer, start) {
+  const raw = dataTransfer.getData(SAMPLE_DRAG_TYPE);
+  if (raw) return loadLibraryItems([JSON.parse(raw)], start);
+  return loadFilesToPads([...dataTransfer.files], start);
+}
+
+function setBrowserOpen(open) {
+  browser.prefs.open = open;
+  browser.savePrefs();
+  document.querySelector('main').classList.toggle('with-browser', open);
+  $('#btnBrowser').classList.toggle('active', open);
+  if (!open) browser.stopPreview();
 }
 
 // ---------- Sample editor ----------
@@ -359,12 +407,16 @@ function buildEditor() {
   });
 
   const wrap = $('#waveWrap');
-  wrap.addEventListener('dragover', (e) => { e.preventDefault(); wrap.classList.add('drop'); });
+  wrap.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    wrap.classList.add('drop');
+  });
   wrap.addEventListener('dragleave', () => wrap.classList.remove('drop'));
   wrap.addEventListener('drop', (e) => {
     e.preventDefault();
     wrap.classList.remove('drop');
-    loadFilesToPads([...e.dataTransfer.files], ui.selected);
+    loadDrop(e.dataTransfer, ui.selected);
   });
   new ResizeObserver(drawWave).observe(wrap);
 
@@ -1035,8 +1087,16 @@ function afterProjectLoad() {
 // ---------- Keyboard & frame loop ----------
 
 function bindKeys() {
-  const typing = (el) => el.tagName === 'INPUT' && (el.type === 'number' || el.type === 'text');
+  const typing = (el) => el.tagName === 'INPUT' && ['number', 'text', 'search'].includes(el.type);
   window.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.code === 'KeyB') { e.preventDefault(); setBrowserOpen(!browser.prefs.open); return; }
+    if (e.ctrlKey && e.code === 'KeyF') {
+      e.preventDefault();
+      setBrowserOpen(true);
+      $('#bSearch').focus();
+      $('#bSearch').select();
+      return;
+    }
     if (typing(e.target)) return;
     if (e.code === 'Escape' && ui.learn) { setLearn(false); return; }
     if (e.ctrlKey && e.code === 'KeyZ') { e.preventDefault(); undo(); return; }
@@ -1082,6 +1142,7 @@ function frame() {
   drawMeter();
   drawWavePlayhead();
   drawGridPlayhead();
+  browser.tick();
   if (recorder.recording) $('#sampleStatus').textContent = `REC → pad ${ui.recTarget + 1} · ${recorder.elapsed.toFixed(1)} s`;
   requestAnimationFrame(frame);
 }
@@ -1114,9 +1175,12 @@ async function main() {
   buildTransport();
   buildMidi();
   bindKeys();
+  $('#btnBrowser').addEventListener('click', () => setBrowserOpen(!browser.prefs.open));
+  setBrowserOpen(browser.prefs.open);
   selectPad(0);
   refreshAll();
   requestAnimationFrame(frame);
+  await browser.init();
   try {
     await midi.init();
   } catch (err) {

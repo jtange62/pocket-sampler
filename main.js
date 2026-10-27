@@ -1,8 +1,19 @@
 const { app, BrowserWindow, ipcMain, dialog, session, desktopCapturer } = require('electron');
 const path = require('path');
+const os = require('os');
 const fs = require('fs/promises');
+const { Library } = require('./library');
 
 const SMOKE = process.argv.includes('--smoke');
+// Smoke runs get a fresh profile of their own so they never touch the real
+// library or settings, and never inherit state from a previous run.
+if (SMOKE) {
+  const profile = path.join(os.tmpdir(), 'pocket-sampler-smoke');
+  require('fs').rmSync(profile, { recursive: true, force: true });
+  app.setPath('userData', profile);
+}
+
+let library = null;
 
 // Let the AudioContext start without waiting for a click.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -67,13 +78,34 @@ const SMOKE_TEST = `(async () => {
   midi.handleMessage([0xfc], performance.now());
   midi.settings.clockIn = false;
   clockSync.stoppedByClock = !seq.playing;
+
+  // Library browser: tree, search, preview, folder-as-kit, and the sandbox.
+  await browser.loadRoots();
+  const libRoot = browser.roots.find((r) => r.name === 'smoke-lib');
+  await browser.toggle({ path: libRoot.path, dir: true });
+  const kicks = browser.children.get(libRoot.path).find((c) => c.name === 'Kicks');
+  await browser.toggle(kicks);
+  const tree = browser.rows.filter((r) => r.path.startsWith(libRoot.path)).map((r) => r.name).join('|');
+  await browser.search('snare');
+  const searchHits = browser.results.map((r) => r.name + ' @ ' + r.sub);
+  await browser.showPreview(browser.results[0], true);
+  const previewing = !!browser.preview;
+  browser.stopPreview();
+  await loadLibraryItems([kicks], 10);
+  const kit = [state.pads[10].name, state.pads[11].name];
+  let outsideBlocked = false;
+  try { await window.native.library.read('C:\\\\Windows\\\\win.ini'); } catch (e) { outsideBlocked = true; }
+  browser.el.search.value = '';
+  await browser.search('');
+  browser.select(browser.rows.find((r) => r.name === 'kick 02.wav'));
+  const libraryCheck = { tree, searchHits, previewing, kit, outsideBlocked };
   const json = Project.serialize(state);
   Project.load(json, state);
   refreshAll();
   return { renderedSeconds: out.duration, peak, wavBytes: wav.byteLength, onsets: onsets.length,
     projectBytes: json.length, padRestored: !!state.pads[0].buffer, notes: seq.pattern.notes.length,
     tickWhilePlaying, ctxState: engine.ctx.state,
-    midiAccess: !!midi.access, midiPadHit, ccVolume, midHeader, midBytes: mid.length, clockSync, swap };
+    midiAccess: !!midi.access, midiPadHit, ccVolume, midHeader, midBytes: mid.length, clockSync, swap, libraryCheck };
 })()`;
 
 function createWindow() {
@@ -154,7 +186,45 @@ ipcMain.handle('open-file', async (event, { title, filters }) => {
   return { path: filePaths[0], name: path.basename(filePaths[0]), data };
 });
 
-app.whenReady().then(() => {
+ipcMain.handle('library-roots', () => library.rootList());
+ipcMain.handle('library-add', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, { title: 'Add a sample folder', properties: ['openDirectory'] });
+  if (!canceled && filePaths.length) await library.addRoot(filePaths[0]);
+  return library.rootList();
+});
+ipcMain.handle('library-remove', (event, dir) => library.removeRoot(dir));
+ipcMain.handle('library-list', (event, dir) => library.list(dir));
+ipcMain.handle('library-search', (event, query) => library.search(query));
+ipcMain.handle('library-read', (event, file) => library.read(file));
+ipcMain.handle('library-refresh', () => library.refresh());
+
+// A tiny 16-bit mono WAV for the smoke test's sample library.
+function testWav(freq, seconds = 0.3, sr = 44100) {
+  const n = Math.round(sr * seconds);
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVE', 8);
+  buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(sr, 24); buf.writeUInt32LE(sr * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34);
+  buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(Math.sin((2 * Math.PI * freq * i) / sr) * Math.exp(-i / sr * 10) * 20000), 44 + i * 2);
+  return buf;
+}
+
+async function makeSmokeLibrary() {
+  const root = path.join(os.tmpdir(), 'pocket-sampler-smoke', 'smoke-lib');
+  for (const [dir, file, freq] of [['Kicks', 'kick 01.wav', 60], ['Kicks', 'kick 02.wav', 70], ['Snares', 'snare 01.wav', 200]]) {
+    await fs.mkdir(path.join(root, dir), { recursive: true });
+    await fs.writeFile(path.join(root, dir, file), testWav(freq));
+  }
+  await library.addRoot(root);
+}
+
+app.whenReady().then(async () => {
+  library = new Library(path.join(app.getPath('userData'), 'library.json'), app.getPath('music'));
+  await library.load();
+  if (SMOKE) await makeSmokeLibrary();
+
   // "System audio" sampling: capture the primary screen with Windows loopback audio.
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
