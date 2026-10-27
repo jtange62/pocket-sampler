@@ -30,6 +30,7 @@ const ui = {
   refreshPadParams: null,
   refreshMasterParams: null,
   sliders: new Map(), // "pad.gain" / "master.volume" -> { label, row, setNorm }
+  padDrag: null,
   learn: false,
   learnTarget: null,
   midiDotTimer: null,
@@ -159,13 +160,32 @@ function buildPads() {
     el.className = 'pad';
     el.style.setProperty('--hue', padHue(i));
     el.innerHTML = `<canvas class="mini"></canvas><span class="num">${i + 1}</span><span class="key">${PAD_KEY_LABELS[i]}</span><span class="name"></span>`;
+    // Press plays immediately; moving past a small threshold turns it into a drag.
     el.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return;
+      if (e.button !== 0 || ui.padDrag) return;
       el.setPointerCapture(e.pointerId);
-      hitPad(i);
+      const recorded = hitPad(i);
+      ui.padDrag = { from: i, pointerId: e.pointerId, x: e.clientX, y: e.clientY, active: false, target: null, recorded };
     });
-    el.addEventListener('pointerup', () => releasePad(i));
-    el.addEventListener('pointercancel', () => releasePad(i));
+    el.addEventListener('pointermove', (e) => {
+      const d = ui.padDrag;
+      if (!d || d.pointerId !== e.pointerId) return;
+      if (!d.active) {
+        if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 12) return;
+        startPadDrag(e);
+      }
+      updatePadDrag(e);
+    });
+    el.addEventListener('pointerup', (e) => {
+      const d = ui.padDrag;
+      if (d && d.pointerId === e.pointerId) endPadDrag(e.ctrlKey);
+      releasePad(i);
+    });
+    el.addEventListener('pointercancel', () => {
+      if (ui.padDrag) ui.padDrag.target = null;
+      endPadDrag(false);
+      releasePad(i);
+    });
     el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('drop'); });
     el.addEventListener('dragleave', () => el.classList.remove('drop'));
     el.addEventListener('drop', (e) => {
@@ -179,11 +199,78 @@ function buildPads() {
   new ResizeObserver(() => state.pads.forEach((_, i) => drawMini(i))).observe(wrap);
 }
 
+// Returns true if the hit was recorded into the pattern.
 function hitPad(i, vel = 1) {
   engine.padDown(i, vel);
   flashPad(i);
-  if (state.pads[i].buffer && seq.recordHit(i, vel)) refreshGrid();
+  const recorded = !!(state.pads[i].buffer && seq.recordHit(i, vel));
+  if (recorded) refreshGrid();
   if (ui.selected !== i) selectPad(i);
+  return recorded;
+}
+
+function startPadDrag(e) {
+  const d = ui.padDrag;
+  d.active = true;
+  releasePad(d.from);
+  // The press that started the drag wasn't meant as a hit.
+  if (d.recorded && seq.undo()) refreshGrid();
+  const src = ui.padEls[d.from];
+  const r = src.getBoundingClientRect();
+  const p = state.pads[d.from];
+  const ghost = document.createElement('div');
+  ghost.className = p.buffer ? 'pad pad-ghost loaded' : 'pad pad-ghost';
+  ghost.style.setProperty('--hue', padHue(d.from));
+  ghost.style.width = `${r.width}px`;
+  ghost.style.height = `${r.height}px`;
+  ghost.innerHTML = `<span class="num">${d.from + 1}</span><span class="name"></span>`;
+  ghost.querySelector('.name').textContent = p.name;
+  document.body.appendChild(ghost);
+  d.ghost = ghost;
+  d.offX = e.clientX - r.left;
+  d.offY = e.clientY - r.top;
+  src.classList.add('dragging');
+}
+
+function updatePadDrag(e) {
+  const d = ui.padDrag;
+  d.ghost.style.transform = `translate(${e.clientX - d.offX}px, ${e.clientY - d.offY}px)`;
+  const under = document.elementFromPoint(e.clientX, e.clientY);
+  const t = under ? ui.padEls.indexOf(under.closest('.pad')) : -1;
+  d.target = t >= 0 && t !== d.from ? t : null;
+  ui.padEls.forEach((el, k) => el.classList.toggle('drop', k === d.target));
+}
+
+function endPadDrag(copy) {
+  const d = ui.padDrag;
+  ui.padDrag = null;
+  if (!d || !d.active) return;
+  d.ghost.remove();
+  ui.padEls.forEach((el) => el.classList.remove('dragging', 'drop'));
+  if (d.target != null) movePad(d.from, d.target, copy);
+}
+
+// Swap two pads (sound, settings and their notes in every pattern), or copy one onto another.
+function movePad(from, to, copy = false) {
+  const now = engine.ctx.currentTime;
+  engine.mixer.cut(from, now);
+  engine.mixer.cut(to, now);
+  engine.held.delete(from);
+  engine.held.delete(to);
+  const pads = state.pads;
+  if (copy) {
+    pads[to] = { ...pads[from] };
+    toast(`Copied pad ${from + 1} to pad ${to + 1}`);
+  } else {
+    [pads[from], pads[to]] = [pads[to], pads[from]];
+    const swap = (n) => { if (n.pad === from) n.pad = to; else if (n.pad === to) n.pad = from; };
+    for (const pat of state.patterns) pat.notes.forEach(swap);
+    for (const snap of seq.undoStack) snap.notes.forEach(swap);
+    toast(`Swapped pads ${from + 1} and ${to + 1}`);
+  }
+  selectPad(to);
+  refreshPads();
+  refreshGrid();
 }
 
 function releasePad(i) {

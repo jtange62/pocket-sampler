@@ -123,6 +123,16 @@ main {
 .pad.selected { box-shadow: 0 0 0 3px #fff; }
 .pad.drop { box-shadow: 0 0 0 3px var(--accent); }
 .pad.hit { animation: hit 0.16s ease-out; }
+.pad.dragging { opacity: 0.35; }
+.pad-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 100;
+  pointer-events: none;
+  opacity: 0.9;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
 @keyframes hit {
   from { filter: brightness(1.9); transform: scale(0.95); }
   to { filter: none; transform: none; }

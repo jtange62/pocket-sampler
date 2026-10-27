@@ -22,6 +22,13 @@ const SMOKE_TEST = `(async () => {
   let peak = 0;
   for (let c = 0; c < out.numberOfChannels; c++) for (const v of out.getChannelData(c)) peak = Math.max(peak, Math.abs(v));
   const wav = DSP.encodeWav(out);
+  movePad(0, 3);
+  const swap = { name: state.pads[3].name, notesFollowed: seq.pattern.notes.filter((x) => x.pad === 3).length, emptied: !state.pads[0].buffer };
+  movePad(3, 0);
+  movePad(0, 7, true);
+  swap.copied = state.pads[7].name === 'smoke' && !!state.pads[0].buffer;
+  Object.assign(state.pads[7], defaultPad());
+  refreshAll();
   const onsets = DSP.detectOnsets(out, 8);
   hitPad(0); releasePad(0);
   seq.play();
@@ -66,7 +73,7 @@ const SMOKE_TEST = `(async () => {
   return { renderedSeconds: out.duration, peak, wavBytes: wav.byteLength, onsets: onsets.length,
     projectBytes: json.length, padRestored: !!state.pads[0].buffer, notes: seq.pattern.notes.length,
     tickWhilePlaying, ctxState: engine.ctx.state,
-    midiAccess: !!midi.access, midiPadHit, ccVolume, midHeader, midBytes: mid.length, clockSync };
+    midiAccess: !!midi.access, midiPadHit, ccVolume, midHeader, midBytes: mid.length, clockSync, swap };
 })()`;
 
 function createWindow() {
@@ -98,6 +105,23 @@ function createWindow() {
       try {
         const result = await win.webContents.executeJavaScript(SMOKE_TEST);
         console.log('SMOKE OK', JSON.stringify(result));
+
+        // Drag pad 1 onto pad 2 with real mouse events.
+        const [a, b] = await win.webContents.executeJavaScript(`ui.padEls.slice(0, 2).map((el) => {
+          const r = el.getBoundingClientRect();
+          return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+        })`);
+        const send = (type, p) => win.webContents.sendInputEvent({ type, x: p.x, y: p.y, button: 'left', clickCount: 1 });
+        send('mouseDown', a);
+        for (let k = 1; k <= 10; k++) {
+          send('mouseMove', { x: Math.round(a.x + ((b.x - a.x) * k) / 10), y: a.y });
+          await new Promise((r) => setTimeout(r, 16));
+        }
+        send('mouseUp', b);
+        await new Promise((r) => setTimeout(r, 100));
+        const dragged = await win.webContents.executeJavaScript(`({ pad2: state.pads[1].name, pad1Empty: !state.pads[0].buffer,
+          ghostGone: !document.querySelector('.pad-ghost'), selected: ui.selected })`);
+        console.log('SMOKE DRAG', JSON.stringify(dragged));
         if (process.env.SMOKE_SHOT) {
           if (process.env.SMOKE_TAB) {
             await win.webContents.executeJavaScript(`document.querySelector('[data-tab="${process.env.SMOKE_TAB}"]').click()`);

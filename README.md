@@ -32,7 +32,8 @@ The builds are unsigned, so Windows SmartScreen shows "Windows protected your PC
 ## Using it
 
 **Pads**: click or use the keys `1–4 / Q–R / A–F / Z–V`. Drag audio files onto a pad; dropping
-several files fills consecutive pads.
+several files fills consecutive pads. Drag a pad onto another to swap them (their notes in every
+pattern move too, so the beat sounds the same); hold Ctrl when dropping to copy instead.
 
 **Sampling**: pick a source in the top bar, select a pad, press **● SAMPLE**, press again to stop.
 
